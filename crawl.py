@@ -88,22 +88,29 @@ def walk(node, ctx, target, hits, others):
                     others.add(u)
 
 
-def scroll_tab(page, url, responses, max_scrolls):
+def scroll_tab(page, url, responses, max_scrolls, log=lambda *a: None):
+    log("info", f"Mở {url}")
     page.goto(url, wait_until="domcontentloaded")
     page.wait_for_timeout(3000)
+    try:
+        page.wait_for_selector('[data-testid="SideNav_AccountSwitcher_Button"]', timeout=8000)
+    except Exception:
+        log("error", "Không thấy giao diện đã đăng nhập - cookie hết hạn, không hợp lệ hoặc chưa nhập cookie")
     stale = 0
     last = 0
-    for _ in range(max_scrolls):
+    for i in range(1, max_scrolls + 1):
         page.mouse.wheel(0, 4000)
         page.wait_for_timeout(1800)
         n = len(responses)
         stale = stale + 1 if n == last else 0
         last = n
+        log("debug", f"  cuộn {i}/{max_scrolls} - {n} phản hồi dữ liệu" + (f", {stale} lần không có dữ liệu mới" if stale else ""))
         if stale >= 3:
+            log("info", "  hết dữ liệu mới, dừng cuộn tab này")
             break
 
 
-def crawl_user(context, user, max_scrolls):
+def crawl_user(context, user, max_scrolls, log=lambda *a: None):
     target = user.lower().lstrip("@")
     responses: list[str] = []
     page = context.new_page()
@@ -116,8 +123,9 @@ def crawl_user(context, user, max_scrolls):
                 pass
 
     page.on("response", on_resp)
+    log("info", f"Bắt đầu @{target}")
     for tab in ("", "/with_replies"):
-        scroll_tab(page, f"https://x.com/{target}{tab}", responses, max_scrolls)
+        scroll_tab(page, f"https://x.com/{target}{tab}", responses, max_scrolls, log)
     hits: dict = {}
     others: set[str] = set()
     for body in responses:
@@ -126,6 +134,9 @@ def crawl_user(context, user, max_scrolls):
         except Exception:
             continue
     page.close()
+    log("info", f"Phân tích {len(responses)} phản hồi -> {len({h[0] for h in hits})} link telegram")
+    if others:
+        log("info", f"Bio có {len(others)} link-in-bio, đang mở: " + ", ".join(others))
 
     # trang link-in-bio: mở và tìm link t.me
     for url in others:
@@ -136,8 +147,9 @@ def crawl_user(context, user, max_scrolls):
             html = p.content() + " " + p.url
             for link in find_tg(html):
                 hits.setdefault((link, f"linkinbio:{url}", None), None)
-        except Exception:
-            pass
+                log("info", f"  link-in-bio {url} -> {link}")
+        except Exception as e:
+            log("warn", f"  không mở được {url}: {str(e)[:80]}")
         p.close()
 
     agg: dict = {}
@@ -156,19 +168,22 @@ def parse_users(items) -> list[str]:
     return list(dict.fromkeys(u for u in users if u))
 
 
-def run_crawl(users, max_scrolls=10, headless=True, on_user=None):
+def run_crawl(users, max_scrolls=10, headless=True, on_user=None, log=lambda *a: None):
     """Crawl lần lượt từng KOL. on_user(user, rows|None, error|None) gọi sau mỗi KOL."""
     all_rows = []
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless)
         context = browser.new_context(locale="en-US")
         x_cookies.apply_to_context(context)
-        for u in users:
+        for i, u in enumerate(users, 1):
+            log("info", f"[{i}/{len(users)}] @{u}")
             try:
-                rows = crawl_user(context, u, max_scrolls)
+                rows = crawl_user(context, u, max_scrolls, log)
                 err = None
+                log("ok", f"@{u}: {len({r['telegram'] for r in rows})} channel/group")
             except Exception as e:
                 rows, err = [], str(e)
+                log("error", f"@{u}: lỗi {err[:120]}")
             all_rows += rows
             if on_user:
                 on_user(u, rows, err)

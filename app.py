@@ -3,6 +3,7 @@ import csv
 import io
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -14,8 +15,8 @@ import x_cookies
 PORT = 8765
 INDEX = Path(__file__).parent / "ui.html"
 lock = threading.Lock()
-state = {"running": False, "users": [], "done": [], "log": [], "rows": []}
-kol = {"running": False, "keyword": "", "keywords": [], "kw_index": 0, "scrolls": 0, "idle": 0, "users": [], "error": ""}
+state = {"running": False, "users": [], "done": [], "log": [], "rows": [], "logs": []}
+kol = {"running": False, "keyword": "", "keywords": [], "kw_index": 0, "scrolls": 0, "idle": 0, "users": [], "error": "", "logs": []}
 kol_index: dict = {}
 kol_stop = threading.Event()
 KOL_COLS = ["username", "name", "followers", "verified", "bio", "keywords", "tweet_url", "tweet"]
@@ -36,6 +37,12 @@ def resolve_in_background():
             resolving.clear()
 
     threading.Thread(target=run, daemon=True).start()
+
+
+def add_log(target: dict, level: str, msg: str):
+    with lock:
+        target["logs"].append({"t": time.strftime("%H:%M:%S"), "level": level, "msg": msg})
+        del target["logs"][:-1500]
 
 
 def cookie_status() -> dict:
@@ -61,11 +68,13 @@ def job(users, max_scrolls):
             state["log"].append(f"@{u}: " + (f"lỗi - {err}" if err else f"{len({r['telegram'] for r in rows})} link"))
 
     try:
-        crawl.run_crawl(users, max_scrolls, True, on_user)
+        crawl.run_crawl(users, max_scrolls, True, on_user, lambda lv, m: add_log(state, lv, m))
+        add_log(state, "ok", f"Hoàn tất: {len(state['rows'])} channel/group từ {len(users)} KOL")
         crawl.write_csv(state["rows"])
     except Exception as e:
         with lock:
             state["log"].append(f"Lỗi: {e}")
+        add_log(state, "error", f"Lỗi: {e}")
     finally:
         with lock:
             state["running"] = False
@@ -98,14 +107,17 @@ def kol_job(keywords, latest, max_users):
                 if kol_stop.is_set():
                     break
                 current["kw"] = kw
+                add_log(kol, "info", f"=== Từ khoá {i + 1}/{len(keywords)}: {kw} ===")
                 with lock:
                     kol.update(keyword=kw, kw_index=i, scrolls=0, idle=0)
                 try:
                     crawl_kol.crawl_keyword(context, kw, latest, max_users, on_user=on_user,
-                                            on_tick=on_tick, should_stop=kol_stop.is_set)
+                                            on_tick=on_tick, should_stop=kol_stop.is_set,
+                                            log=lambda lv, m: add_log(kol, lv, m))
                 except Exception as e:
                     with lock:
                         kol["error"] += f"[{kw}] {e} "
+                    add_log(kol, "error", f"[{kw}] lỗi: {str(e)[:150]}")
             browser.close()
     except Exception as e:
         with lock:
@@ -113,6 +125,7 @@ def kol_job(keywords, latest, max_users):
     finally:
         with lock:
             kol.update(running=False, kw_index=len(keywords))
+    add_log(kol, "ok", f"Hoàn tất: {len(kol['users'])} user duy nhất")
 
 
 class H(BaseHTTPRequestHandler):
@@ -180,7 +193,7 @@ class H(BaseHTTPRequestHandler):
             with lock:
                 if kol["running"]:
                     return self.send(json.dumps({"error": "Đang chạy"}), code=409)
-                kol.update(running=True, keyword="", keywords=keywords, kw_index=0, scrolls=0, idle=0, users=[], error="")
+                kol.update(running=True, keyword="", keywords=keywords, kw_index=0, scrolls=0, idle=0, users=[], error="", logs=[])
                 kol_index.clear()
             kol_stop.clear()
             threading.Thread(target=kol_job, daemon=True, args=(
@@ -188,6 +201,7 @@ class H(BaseHTTPRequestHandler):
             self.send(json.dumps({"ok": True}))
         elif self.path == "/api/kol/stop":
             kol_stop.set()
+            add_log(kol, "warn", "Đã bấm Dừng - sẽ dừng sau lần cuộn hiện tại")
             self.send(json.dumps({"ok": True}))
         elif self.path == "/api/crawl":
             users = crawl.parse_users(data.get("users", "").split())
@@ -198,7 +212,7 @@ class H(BaseHTTPRequestHandler):
             with lock:
                 if state["running"]:
                     return self.send(json.dumps({"error": "Đang chạy"}), code=409)
-                state.update(running=True, users=users, done=[], log=[], rows=[])
+                state.update(running=True, users=users, done=[], log=[], rows=[], logs=[])
             threading.Thread(target=job, args=(users, int(data.get("max_scrolls", 10))), daemon=True).start()
             self.send(json.dumps({"ok": True}))
         else:

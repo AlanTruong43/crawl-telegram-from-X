@@ -46,7 +46,7 @@ def to_user(u, tweet_id, text):
 
 
 def crawl_keyword(context, keyword, latest=True, max_users=500, max_idle=12,
-                  on_user=None, on_tick=None, should_stop=lambda: False):
+                  on_user=None, on_tick=None, should_stop=lambda: False, log=lambda *a: None):
     """Lướt liên tục kết quả tìm kiếm tới khi hết bài mới / đủ max_users / bị dừng.
 
     on_user(user_dict) gọi cho mỗi username mới; on_tick(scrolls, total, idle) mỗi lần lướt.
@@ -71,8 +71,13 @@ def crawl_keyword(context, keyword, latest=True, max_users=500, max_idle=12,
 
     page.on("response", on_resp)
     url = f"https://x.com/search?q={quote(keyword)}&src=typed_query" + ("&f=live" if latest else "")
+    log("info", f"Mở {url}")
     page.goto(url, wait_until="domcontentloaded")
     page.wait_for_timeout(4000)
+    try:
+        page.wait_for_selector('[data-testid="SideNav_AccountSwitcher_Button"]', timeout=8000)
+    except Exception:
+        log("error", "Không thấy giao diện đã đăng nhập - cookie hết hạn, không hợp lệ hoặc chưa nhập cookie")
 
     idle = scrolls = 0
     while idle < max_idle and len(users) < max_users and not should_stop():
@@ -85,13 +90,23 @@ def crawl_keyword(context, keyword, latest=True, max_users=500, max_idle=12,
         if retry.count():
             try:
                 retry.first.click(timeout=1000)
+                log("warn", "X báo lỗi tạm thời (có thể bị giới hạn tốc độ) - đã bấm Retry")
                 page.wait_for_timeout(2500)
             except Exception:
                 pass
         scrolls += 1
         idle = 0 if len(users) > before else idle + 1
+        log("debug", f"  cuộn {scrolls}: +{len(users) - before} user mới (tổng {len(users)})"
+            + (f", {idle}/{max_idle} lần không có bài mới" if idle else ""))
         if on_tick:
             on_tick(scrolls, len(users), idle)
+    if should_stop():
+        reason = "bị dừng thủ công"
+    elif len(users) >= max_users:
+        reason = f"đủ {max_users} user"
+    else:
+        reason = f"{max_idle} lần cuộn liên tiếp không có bài mới (hết kết quả hoặc X ngừng trả thêm)"
+    log("ok", f"Xong \"{keyword}\": {len(users)} user - dừng vì {reason}")
     page.close()
     return list(users.values())
 

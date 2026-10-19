@@ -43,6 +43,8 @@
   .modal[hidden] { display:none; }
   .dialog { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:20px; width:100%; max-width:520px; }
   .dialog h3 { margin:0 0 4px; } .dialog p { margin:0 0 12px; color:var(--muted); font-size:13px; }
+  .logbox { font:12px/1.65 ui-monospace,Menlo,monospace; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px; height:220px; overflow:auto; white-space:pre-wrap; word-break:break-all; }
+  .logbox .t { color:var(--muted); } .logbox .debug { color:var(--muted); } .logbox .warn { color:#d97706; } .logbox .error { color:var(--bad); } .logbox .ok { color:var(--ok); }
   [hidden] { display:none !important; }
 </style>
 </head>
@@ -93,6 +95,13 @@
       </div>
       <div class="empty" id="kwEmpty">Chưa có kết quả.</div>
     </section>
+
+    <section class="card">
+      <h2>Nhật ký tìm KOL <span id="kwLogCount" class="muted"></span></h2>
+      <div class="logbox" id="kwLogBox"><span class="muted">Chưa có log.</span></div>
+      <div class="row" style="margin-top:8px"><button class="ghost" id="kwLogCopy">Copy log</button>
+        <label class="muted"><input type="checkbox" id="kwLogDebug" checked> Hiện chi tiết từng lần cuộn</label></div>
+    </section>
   </div>
 
   <!-- ===== Trang tìm Telegram ===== -->
@@ -124,6 +133,13 @@
         </table>
       </div>
       <div class="empty" id="empty">Chưa có kết quả.</div>
+    </section>
+
+    <section class="card">
+      <h2>Nhật ký quét Telegram <span id="tgLogCount" class="muted"></span></h2>
+      <div class="logbox" id="tgLogBox"><span class="muted">Chưa có log.</span></div>
+      <div class="row" style="margin-top:8px"><button class="ghost" id="tgLogCopy">Copy log</button>
+        <label class="muted"><input type="checkbox" id="tgLogDebug" checked> Hiện chi tiết từng lần cuộn</label></div>
     </section>
   </div>
 </main>
@@ -238,7 +254,7 @@ function renderKol() {
     <td><a href="${esc(u.tweet_url)}" target="_blank" rel="noopener">mở</a></td></tr>`).join('');
 }
 async function pollKol() {
-  try { kol = await api('/api/kol/status'); renderKol(); } catch {}
+  try { kol = await api('/api/kol/status'); renderKol(); renderLogs('kw', kol.logs); } catch {}
   setTimeout(pollKol, kol.running ? 1500 : 5000);
 }
 $('kwStart').onclick = async () => {
@@ -279,7 +295,7 @@ function renderTg() {
     <td><a href="${esc(r.x_url)}" target="_blank" rel="noopener">mở</a></td></tr>`).join('');
 }
 async function pollTg() {
-  try { data = await api('/api/status'); renderTg(); } catch {}
+  try { data = await api('/api/status'); renderTg(); renderLogs('tg', data.logs); } catch {}
   setTimeout(pollTg, data.running ? 1500 : 4000);
 }
 $('start').onclick = async () => {
@@ -292,6 +308,25 @@ $('copy').onclick = () => {
   navigator.clipboard.writeText([...new Set(data.rows.map(r => 'https://' + r.telegram))].join('\n'));
   $('copy').textContent = 'Đã copy'; setTimeout(() => $('copy').textContent = 'Copy link', 1200);
 };
+
+/* ---------- nhật ký ---------- */
+function renderLogs(pre, logs) {
+  const box = $(pre + 'LogBox'), showDebug = $(pre + 'LogDebug').checked;
+  const list = (logs || []).filter(l => showDebug || l.level !== 'debug');
+  $(pre + 'LogCount').textContent = logs && logs.length ? `(${logs.length} dòng)` : '';
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  box.innerHTML = list.length ? list.map(l => `<div class="${l.level}"><span class="t">${l.t}</span> ${esc(l.msg)}</div>`).join('')
+                              : '<span class="muted">Chưa có log.</span>';
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
+function wireLogs(pre, get) {
+  $(pre + 'LogDebug').onchange = () => renderLogs(pre, get());
+  $(pre + 'LogCopy').onclick = () => {
+    navigator.clipboard.writeText((get() || []).map(l => `${l.t} [${l.level}] ${l.msg}`).join('\n'));
+    $(pre + 'LogCopy').textContent = 'Đã copy'; setTimeout(() => $(pre + 'LogCopy').textContent = 'Copy log', 1200);
+  };
+}
+wireLogs('kw', () => kol.logs); wireLogs('tg', () => data.logs);
 
 showPage(store.get('page') === 'tg' ? 'tg' : 'kol');
 pollTg(); pollKol();
