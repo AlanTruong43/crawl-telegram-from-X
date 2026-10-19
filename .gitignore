@@ -1,0 +1,6 @@
+x_cookies.json
+raw*.txt
+output/
+.venv/
+__pycache__/
+.DS_Store

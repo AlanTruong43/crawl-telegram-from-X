@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>X Crawler</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#16181c; --muted:#6b7280; --line:#e5e7eb; --accent:#1d9bf0; --ok:#16a34a; --bad:#dc2626; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0b0d10; --card:#14171b; --text:#e7e9ea; --muted:#8b94a0; --line:#252a30; --accent:#4cb3ff; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  main { max-width:1040px; margin:0 auto; padding:20px 16px 64px; }
+  header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:20px; }
+  nav { display:flex; gap:4px; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:4px; }
+  nav button { background:transparent; color:var(--muted); padding:7px 14px; }
+  nav button.on { background:var(--accent); color:#fff; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+  .card h2 { font-size:13px; margin:0 0 10px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+  textarea, input, select { background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:9px 10px; font:inherit; }
+  textarea { width:100%; min-height:110px; resize:vertical; font-family:ui-monospace,Menlo,monospace; font-size:13px; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:9px 16px; font:inherit; font-weight:600; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--text); border:1px solid var(--line); }
+  button.danger { background:var(--bad); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:12px; }
+  .pill { font:600 13px inherit; padding:6px 12px; border-radius:99px; background:transparent; border:1px solid var(--line); cursor:pointer; }
+  .pill.ok { color:var(--ok); border-color:var(--ok); } .pill.bad { color:#fff; background:var(--bad); border-color:var(--bad); }
+  .bar { height:6px; background:var(--line); border-radius:99px; overflow:hidden; margin-top:12px; }
+  .bar > div { height:100%; background:var(--accent); width:0; transition:width .3s; }
+  .bar.busy > div { width:35% !important; animation:slide 1.2s infinite ease-in-out; }
+  @keyframes slide { 0% { margin-left:-35%; } 100% { margin-left:100%; } }
+  .log { font:12px/1.6 ui-monospace,Menlo,monospace; color:var(--muted); margin-top:8px; max-height:110px; overflow:auto; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:9px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase; }
+  td a { color:var(--accent); text-decoration:none; word-break:break-all; } td a:hover { text-decoration:underline; }
+  .tag { font-size:12px; padding:2px 8px; border-radius:6px; background:var(--bg); border:1px solid var(--line); }
+  .muted { color:var(--muted); } .empty { padding:24px; text-align:center; color:var(--muted); }
+  .bio { max-width:340px; color:var(--muted); font-size:13px; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+  .tablewrap { overflow-x:auto; max-height:560px; overflow-y:auto; }
+  thead th { position:sticky; top:0; background:var(--card); }
+  .modal { position:fixed; inset:0; background:rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center; padding:16px; z-index:10; }
+  .modal[hidden] { display:none; }
+  .dialog { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:20px; width:100%; max-width:520px; }
+  .dialog h3 { margin:0 0 4px; } .dialog p { margin:0 0 12px; color:var(--muted); font-size:13px; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <nav>
+      <button id="navKol" class="on">Tìm KOL</button>
+      <button id="navTg">Tìm Telegram</button>
+    </nav>
+    <button id="cookiePill" class="pill">…</button>
+  </header>
+
+  <!-- ===== Trang tìm KOL ===== -->
+  <div id="pageKol">
+    <section class="card">
+      <h2>Từ khoá tìm kiếm</h2>
+      <div class="row" style="margin-top:0">
+        <textarea id="kw" placeholder="Mỗi dòng một từ khoá (hoặc ngăn cách bằng dấu phẩy)&#10;crypto&#10;airdrop&#10;memecoin" style="flex:1;min-width:220px;min-height:84px"></textarea>
+        <select id="kwTab"><option value="1">Mới nhất</option><option value="0">Nổi bật</option></select>
+        <label class="muted">Tối đa / từ khoá <input id="kwMax" type="number" min="10" max="5000" value="500" style="width:90px"> user</label>
+        <button id="kwStart">Bắt đầu</button>
+        <button id="kwStop" class="danger" hidden>Dừng</button>
+      </div>
+      <div id="kwProg" hidden>
+        <div class="bar" id="kwBar"><div></div></div>
+        <div class="log" id="kwLog"></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Username tìm được <span id="kwCount" class="muted"></span></h2>
+      <div class="row" style="margin:0 0 10px">
+        <input id="kwFilter" placeholder="Lọc theo username, tên, bio…" style="flex:1;min-width:180px">
+        <label class="muted">Follower ≥ <input id="kwMin" type="number" min="0" value="0" style="width:100px"></label>
+        <select id="kwSort"><option value="found">Thứ tự tìm thấy</option><option value="followers">Follower giảm dần</option></select>
+      </div>
+      <div class="row" style="margin:0 0 10px">
+        <button class="ghost" id="kwCopy">Copy username</button>
+        <a href="/api/kol/export.csv"><button class="ghost" type="button">Tải CSV</button></a>
+        <button id="kwToTg">Quét Telegram những KOL này →</button>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Username</th><th>Tên</th><th>Follower</th><th>Từ khoá</th><th>Bio</th><th>Bài</th></tr></thead>
+          <tbody id="kwRows"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="kwEmpty">Chưa có kết quả.</div>
+    </section>
+  </div>
+
+  <!-- ===== Trang tìm Telegram ===== -->
+  <div id="pageTg" hidden>
+    <section class="card">
+      <h2>KOL cần quét</h2>
+      <textarea id="users" placeholder="Mỗi dòng một handle hoặc link x.com&#10;nivradotfun&#10;https://x.com/ArtPlatformX&#10;@MeowCoin777"></textarea>
+      <div class="row">
+        <button id="start">Bắt đầu quét</button>
+        <label class="muted">Số lần cuộn / tab <input id="scrolls" type="number" min="1" max="100" value="10" style="width:80px;margin-left:6px"></label>
+      </div>
+      <div id="progress" hidden>
+        <div class="bar"><div id="barFill"></div></div>
+        <div class="log" id="log"></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Kết quả <span id="count" class="muted"></span></h2>
+      <div class="row" style="margin:0 0 10px">
+        <input id="filter" placeholder="Lọc theo KOL hoặc channel…" style="flex:1;min-width:200px">
+        <button class="ghost" id="copy">Copy link</button>
+        <a href="/api/export.csv"><button class="ghost" type="button">Tải CSV</button></a>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>KOL</th><th>Telegram</th><th>Nguồn</th><th>Lần</th><th>Bài X</th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="empty">Chưa có kết quả.</div>
+    </section>
+  </div>
+</main>
+
+<!-- Popup nhập cookie -->
+<div class="modal" id="cookieModal" hidden>
+  <div class="dialog">
+    <h3>Nhập cookie tài khoản X</h3>
+    <p>Cần có <code>auth_token</code> và <code>ct0</code>. Dán nguyên chuỗi cookie, hoặc dạng <code>user|pass|cookie…</code>.</p>
+    <textarea id="cookieRaw" placeholder="auth_token=…; ct0=…; twid=…"></textarea>
+    <div class="row">
+      <button id="saveCookie">Lưu cookie</button>
+      <button class="ghost" id="closeCookie">Đóng</button>
+      <span id="cookieMsg" class="muted"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt = n => n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(1)+'K' : n;
+async function api(path, body) {
+  const r = await fetch(path, body ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)} : undefined);
+  const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); return j;
+}
+const store = { get: k => { try { return localStorage.getItem(k); } catch { return null; } },
+                set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+
+/* ---------- điều hướng + cookie ---------- */
+function showPage(p) {
+  $('pageKol').hidden = p !== 'kol'; $('pageTg').hidden = p !== 'tg';
+  $('navKol').classList.toggle('on', p === 'kol'); $('navTg').classList.toggle('on', p === 'tg');
+  store.set('page', p);
+}
+$('navKol').onclick = () => showPage('kol');
+$('navTg').onclick = () => showPage('tg');
+
+let cookieOk = false;
+function renderCookie(c) {
+  cookieOk = !!c.ok;
+  $('cookiePill').textContent = c.ok ? 'Đã có cookie' : 'Nhập cookie';
+  $('cookiePill').className = 'pill ' + (c.ok ? 'ok' : 'bad');
+}
+const openCookie = () => { $('cookieMsg').textContent = ''; $('cookieModal').hidden = false; $('cookieRaw').focus(); };
+$('cookiePill').onclick = openCookie;
+$('closeCookie').onclick = () => $('cookieModal').hidden = true;
+$('cookieModal').onclick = e => { if (e.target === $('cookieModal')) $('cookieModal').hidden = true; };
+$('saveCookie').onclick = async () => {
+  try { await api('/api/cookies', {raw: $('cookieRaw').value}); $('cookieRaw').value = ''; $('cookieModal').hidden = true; pollTg(); }
+  catch (e) { $('cookieMsg').textContent = e.message; }
+};
+const needCookie = () => { if (!cookieOk) { openCookie(); return true; } return false; };
+
+/* ---------- trang KOL ---------- */
+let kol = {running:false, users:[], keywords:[], kw_index:0, scrolls:0, idle:0, keyword:'', error:''};
+function renderKol() {
+  $('kwStart').hidden = kol.running; $('kwStop').hidden = !kol.running;
+  $('kwProg').hidden = !kol.keywords.length;
+  $('kwBar').classList.toggle('busy', kol.running);
+  $('kwLog').innerHTML = esc(`Từ khoá ${Math.min(kol.kw_index + 1, kol.keywords.length)}/${kol.keywords.length}`
+    + (kol.running ? ` "${kol.keyword}"` : '') + ` — ${kol.users.length} user (đã loại trùng), ${kol.scrolls} lần cuộn`
+    + (kol.running ? (kol.idle ? `, ${kol.idle} lần không có bài mới` : ', đang lướt…') : ', đã xong')) + (kol.error ? `<br>Lỗi: ${esc(kol.error)}` : '');
+
+  const q = $('kwFilter').value.trim().toLowerCase(), min = +$('kwMin').value || 0;
+  let rows = kol.users.filter(u => u.followers >= min &&
+    (!q || (u.username + ' ' + u.name + ' ' + u.bio + ' ' + u.keywords.join(' ')).toLowerCase().includes(q)));
+  if ($('kwSort').value === 'followers') rows = [...rows].sort((a, b) => b.followers - a.followers);
+  $('kwCount').textContent = kol.users.length ? `(${rows.length}/${kol.users.length})` : '';
+  $('kwEmpty').hidden = rows.length > 0;
+  $('kwRows').innerHTML = rows.slice(0, 1500).map(u => `<tr>
+    <td><a href="https://x.com/${esc(u.username)}" target="_blank" rel="noopener">@${esc(u.username)}</a></td>
+    <td>${esc(u.name)}${u.verified ? ' <span class="tag">✓</span>' : ''}</td>
+    <td>${fmt(u.followers)}</td><td>${u.keywords.map(k => `<span class="tag">${esc(k)}</span>`).join(' ')}</td><td><div class="bio">${esc(u.bio)}</div></td>
+    <td><a href="${esc(u.tweet_url)}" target="_blank" rel="noopener">mở</a></td></tr>`).join('');
+}
+async function pollKol() {
+  try { kol = await api('/api/kol/status'); renderKol(); } catch {}
+  setTimeout(pollKol, kol.running ? 1500 : 5000);
+}
+$('kwStart').onclick = async () => {
+  if (needCookie()) return;
+  try { await api('/api/kol/start', {keywords: $('kw').value, latest: $('kwTab').value === '1', max_users: +$('kwMax').value}); pollKol(); }
+  catch (e) { alert(e.message); }
+};
+$('kwStop').onclick = () => api('/api/kol/stop', {});
+['kwFilter','kwMin','kwSort'].forEach(id => $(id).oninput = renderKol);
+$('kwCopy').onclick = () => {
+  navigator.clipboard.writeText(kol.users.map(u => '@' + u.username).join('\n'));
+  $('kwCopy').textContent = 'Đã copy'; setTimeout(() => $('kwCopy').textContent = 'Copy username', 1200);
+};
+$('kwToTg').onclick = () => {
+  if (!kol.users.length) return;
+  $('users').value = kol.users.map(u => u.username).join('\n'); showPage('tg');
+};
+
+/* ---------- trang Telegram ---------- */
+let data = {rows: [], running: false, users: [], done: [], log: [], cookie: {}};
+function renderTg() {
+  renderCookie(data.cookie || {});
+  $('start').disabled = data.running;
+  $('start').textContent = data.running ? 'Đang quét…' : 'Bắt đầu quét';
+  const total = data.users.length, done = data.done.length;
+  $('progress').hidden = !total;
+  $('barFill').style.width = total ? (done / total * 100) + '%' : '0';
+  $('log').innerHTML = data.log.map(esc).join('<br>') + (data.running ? `<br>Đang quét ${done + 1}/${total}…` : '');
+  const q = $('filter').value.trim().toLowerCase();
+  const rows = data.rows.filter(r => !q || r.kol.includes(q) || r.telegram.toLowerCase().includes(q));
+  $('count').textContent = data.rows.length ? `(${data.rows.length} channel/group)` : '';
+  $('empty').hidden = rows.length > 0;
+  $('rows').innerHTML = rows.map(r => `<tr>
+    <td>@${esc(r.kol)}</td>
+    <td><a href="https://${esc(r.telegram)}" target="_blank" rel="noopener">${esc(r.telegram)}</a></td>
+    <td><span class="tag">${r.source.startsWith('linkinbio') ? 'link-in-bio' : esc(r.source)}</span></td>
+    <td class="muted">${r.count}</td>
+    <td><a href="${esc(r.x_url)}" target="_blank" rel="noopener">mở</a></td></tr>`).join('');
+}
+async function pollTg() {
+  try { data = await api('/api/status'); renderTg(); } catch {}
+  setTimeout(pollTg, data.running ? 1500 : 4000);
+}
+$('start').onclick = async () => {
+  if (needCookie()) return;
+  try { await api('/api/crawl', {users: $('users').value, max_scrolls: +$('scrolls').value}); pollTg(); }
+  catch (e) { alert(e.message); }
+};
+$('filter').oninput = renderTg;
+$('copy').onclick = () => {
+  navigator.clipboard.writeText([...new Set(data.rows.map(r => 'https://' + r.telegram))].join('\n'));
+  $('copy').textContent = 'Đã copy'; setTimeout(() => $('copy').textContent = 'Copy link', 1200);
+};
+
+showPage(store.get('page') === 'tg' ? 'tg' : 'kol');
+pollTg(); pollKol();
+</script>
+</body>
+</html>
