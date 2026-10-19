@@ -4,3 +4,4 @@ output/
 .venv/
 __pycache__/
 .DS_Store
+x_account.json

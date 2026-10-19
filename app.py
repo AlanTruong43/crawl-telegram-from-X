@@ -21,12 +21,36 @@ kol_stop = threading.Event()
 KOL_COLS = ["username", "name", "followers", "verified", "bio", "keywords", "tweet_url", "tweet"]
 
 
+resolving = threading.Event()
+
+
+def resolve_in_background():
+    if resolving.is_set():
+        return
+    resolving.set()
+
+    def run():
+        try:
+            x_cookies.resolve_account()
+        finally:
+            resolving.clear()
+
+    threading.Thread(target=run, daemon=True).start()
+
+
 def cookie_status() -> dict:
     if not x_cookies.COOKIE_FILE.exists():
         return {"ok": False, "msg": "Chưa import cookie"}
     names = {c["name"] for c in x_cookies.load()}
     miss = [k for k in x_cookies.REQUIRED if k not in names]
-    return {"ok": not miss, "msg": "Đã có cookie" if not miss else "Thiếu " + ", ".join(miss)}
+    if miss:
+        return {"ok": False, "msg": "Thiếu " + ", ".join(miss)}
+    info = {}
+    if x_cookies.META_FILE.exists():
+        info = json.loads(x_cookies.META_FILE.read_text())
+    else:
+        resolve_in_background()
+    return {"ok": True, "msg": "Đã có cookie", "username": info.get("username"), "name": info.get("name")}
 
 
 def job(users, max_scrolls):
@@ -141,6 +165,11 @@ class H(BaseHTTPRequestHandler):
             if miss:
                 return self.send(json.dumps({"error": "Thiếu cookie bắt buộc: " + ", ".join(miss)}), code=400)
             x_cookies.save(cookies)
+            x_cookies.META_FILE.unlink(missing_ok=True)
+            resolve_in_background()
+            self.send(json.dumps({"ok": True}))
+        elif self.path == "/api/cookies/logout":
+            x_cookies.clear()
             self.send(json.dumps({"ok": True}))
         elif self.path == "/api/kol/start":
             keywords = list(dict.fromkeys(k.strip() for k in data.get("keywords", "").replace(",", "\n").splitlines() if k.strip()))

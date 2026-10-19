@@ -131,13 +131,32 @@
 <!-- Popup nhập cookie -->
 <div class="modal" id="cookieModal" hidden>
   <div class="dialog">
+    <div id="acctView" hidden>
+      <h3>Tài khoản X</h3>
+      <p>Đang dùng cookie của:</p>
+      <div style="font-size:18px;font-weight:600;margin-bottom:14px" id="acctName">…</div>
+      <div class="row" style="margin-top:0">
+        <button class="danger" id="logoutCookie">Đăng xuất cookie</button>
+        <button class="ghost" id="changeCookie">Đổi cookie</button>
+        <button class="ghost" id="closeAcct">Đóng</button>
+      </div>
+      <p style="margin:12px 0 0">Đăng xuất chỉ xoá cookie đã lưu trong tool, không đăng xuất tài khoản trên x.com.</p>
+    </div>
+    <div id="cookieForm">
     <h3>Nhập cookie tài khoản X</h3>
     <p>Cần có <code>auth_token</code> và <code>ct0</code>. Dán nguyên chuỗi cookie, hoặc dạng <code>user|pass|cookie…</code>.</p>
+    <div class="row" style="margin:0 0 10px">
+      <button class="ghost" id="copyCode">Copy code lấy cookie</button>
+      <span class="muted" style="font-size:12px">Dán vào Console (F12) của x.com đang đăng nhập, rồi Enter</span>
+    </div>
     <textarea id="cookieRaw" placeholder="auth_token=…; ct0=…; twid=…"></textarea>
+    <input id="authToken" placeholder="Dán auth_token vào đây" style="width:100%;margin-top:8px">
+    <p style="margin:6px 0 0">Console không đọc được <code>auth_token</code> (HttpOnly), nên cần dán riêng: F12 → Application → Cookies → x.com → <code>auth_token</code>.</p>
     <div class="row">
       <button id="saveCookie">Lưu cookie</button>
       <button class="ghost" id="closeCookie">Đóng</button>
       <span id="cookieMsg" class="muted"></span>
+    </div>
     </div>
   </div>
 </div>
@@ -162,19 +181,37 @@ function showPage(p) {
 $('navKol').onclick = () => showPage('kol');
 $('navTg').onclick = () => showPage('tg');
 
-let cookieOk = false;
+let cookieOk = false, cookieInfo = {}, forceForm = false;
+function renderAcct() {
+  const show = cookieOk && !forceForm;
+  $('acctView').hidden = !show; $('cookieForm').hidden = show;
+  $('acctName').textContent = cookieInfo.username ? '@' + cookieInfo.username + (cookieInfo.name ? ' · ' + cookieInfo.name : '') : 'Đang lấy username…';
+}
 function renderCookie(c) {
-  cookieOk = !!c.ok;
+  cookieOk = !!c.ok; cookieInfo = c;
+  renderAcct();
   $('cookiePill').textContent = c.ok ? 'Đã có cookie' : 'Nhập cookie';
   $('cookiePill').className = 'pill ' + (c.ok ? 'ok' : 'bad');
 }
-const openCookie = () => { $('cookieMsg').textContent = ''; $('cookieModal').hidden = false; $('cookieRaw').focus(); };
+const openCookie = () => { forceForm = false; renderAcct(); $('cookieMsg').textContent = ''; $('cookieModal').hidden = false; $('cookieRaw').focus(); };
 $('cookiePill').onclick = openCookie;
-$('closeCookie').onclick = () => $('cookieModal').hidden = true;
+$('closeCookie').onclick = $('closeAcct').onclick = () => $('cookieModal').hidden = true;
+$('changeCookie').onclick = () => { forceForm = true; renderAcct(); };
+$('logoutCookie').onclick = async () => {
+  await api('/api/cookies/logout', {}); $('cookieModal').hidden = true; cookieInfo = {}; pollTg();
+};
 $('cookieModal').onclick = e => { if (e.target === $('cookieModal')) $('cookieModal').hidden = true; };
 $('saveCookie').onclick = async () => {
-  try { await api('/api/cookies', {raw: $('cookieRaw').value}); $('cookieRaw').value = ''; $('cookieModal').hidden = true; pollTg(); }
+  try {
+    let raw = $('cookieRaw').value, tok = $('authToken').value.trim().replace(/^auth_token=/, '');
+    if (tok && !/(^|;\s*)auth_token=/.test(raw)) raw += '; auth_token=' + tok;
+    await api('/api/cookies', {raw}); $('cookieRaw').value = ''; $('authToken').value = ''; forceForm = false; $('cookieModal').hidden = true; pollTg(); }
   catch (e) { $('cookieMsg').textContent = e.message; }
+};
+const COOKIE_CODE = "copy(document.cookie);\nconsole.log('đã copy cookie vào clipboard:', document.cookie);";
+$('copyCode').onclick = () => {
+  navigator.clipboard.writeText(COOKIE_CODE);
+  $('copyCode').textContent = 'Đã copy code'; setTimeout(() => $('copyCode').textContent = 'Copy code lấy cookie', 1500);
 };
 const needCookie = () => { if (!cookieOk) { openCookie(); return true; } return false; };
 

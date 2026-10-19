@@ -9,17 +9,22 @@ Chuỗi đầu vào có thể là `user|pass|name=value; name=value; ...` hoặc
 """
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
 COOKIE_FILE = Path(__file__).parent / "x_cookies.json"
+META_FILE = Path(__file__).parent / "x_account.json"
 REQUIRED = ("auth_token", "ct0")
 
 
 def parse_cookie_string(raw: str) -> dict[str, str]:
     raw = raw.strip()
-    # bỏ phần user|pass| phía trước, chỉ giữ cookie
-    cookie = raw.split("|")[-1] if "|" in raw else raw
+    # bỏ phần user|pass| phía trước: bắt đầu từ đoạn đầu tiên có dạng name=value
+    # (không cắt theo dấu | cuối vì giá trị cookie như external_referer cũng chứa |)
+    parts = raw.split("|")
+    start = next((i for i, p in enumerate(parts) if re.match(r"\s*[\w.\-]+=", p)), 0)
+    cookie = "|".join(parts[start:])
     cookies: dict[str, str] = {}
     for part in cookie.split(";"):
         name, sep, value = part.partition("=")
@@ -58,6 +63,38 @@ def load() -> list[dict]:
 def apply_to_context(context) -> None:
     """Nạp cookie đã lưu vào BrowserContext của Playwright."""
     context.add_cookies(load())
+
+
+def resolve_account() -> dict | None:
+    """Mở x.com/home bằng cookie đã lưu để đọc username đang đăng nhập."""
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            context = browser.new_context(locale="en-US")
+            apply_to_context(context)
+            page = context.new_page()
+            page.goto("https://x.com/home", wait_until="domcontentloaded")
+            link = page.wait_for_selector('[data-testid="AppTabBar_Profile_Link"]', timeout=20000)
+            username = link.get_attribute("href").strip("/")
+            name = ""
+            try:
+                name = page.locator('[data-testid="SideNav_AccountSwitcher_Button"]').inner_text(timeout=3000).split("\n")[0]
+            except Exception:
+                pass
+            info = {"username": username, "name": name}
+            META_FILE.write_text(json.dumps(info))
+            return info
+        except Exception:
+            return None
+        finally:
+            browser.close()
+
+
+def clear() -> None:
+    COOKIE_FILE.unlink(missing_ok=True)
+    META_FILE.unlink(missing_ok=True)
 
 
 def cmd_import(args) -> None:
